@@ -1,0 +1,47 @@
+{
+ "lst_20240604": {
+  "shade_1055": -0.16,
+  "shade_mean_day": -0.09,
+  "building_cover": 0.46,
+  "mean_building_height_m": -0.69,
+  "tall_share_of_footprint": -0.56
+ },
+ "lst_all_mean": {
+  "shade_1055": -0.16,
+  "shade_mean_day": -0.1,
+  "building_cover": 0.46,
+  "mean_building_height_m": -0.69,
+  "tall_share_of_footprint": -0.57
+ },
+ "ols_building_cover": {
+  "r2": 0.16,
+  "coef": {
+   "const": 0.0,
+   "building_cover": 0.4
+  }
+ },
+ "ols_shade_1055": {
+  "r2": 0.019,
+  "coef": {
+   "const": 0.0,
+   "shade_1055": -0.14
+  }
+ },
+ "ols_building_cover+shade_1055": {
+  "r2": 0.315,
+  "coef": {
+   "const": 0.0,
+   "building_cover": 0.63,
+   "shade_1055": -0.46
+  }
+ },
+ "ols_building_cover+shade_1055+mean_building_height_m": {
+  "r2": 0.404,
+  "coef": {
+   "const": 0.0,
+   "building_cover": 0.37,
+   "shade_1055": -0.16,
+   "mean_building_height_m": -0.41
+  }
+ }
+}
