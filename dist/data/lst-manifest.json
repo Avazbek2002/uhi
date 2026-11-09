@@ -1,0 +1,10 @@
+{
+  "maps": [
+    {
+      "date": "2024-06-04",
+      "url": "https://pub-ec33c8a1d13f40f4935fa09d39bb00ce.r2.dev/landsat-lst-scenes/tashkent_2024-06-04.png",
+      "label": "Landsat acquisition",
+      "bounds": [[69.126, 41.396], [69.466, 41.396], [69.466, 41.166], [69.126, 41.166]]
+    }
+  ]
+}

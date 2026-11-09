@@ -1,0 +1,22 @@
+{
+  "maps": [
+    {
+      "date": "2024-06-14",
+      "url": "https://data.example.com/tashkent_lst_2024-06-14.png",
+      "label": "Landsat acquisition",
+      "bounds": [[69.126, 41.396], [69.466, 41.396], [69.466, 41.166], [69.126, 41.166]]
+    },
+    {
+      "date": "2024-07-02",
+      "url": "https://data.example.com/tashkent_lst_2024-07-02.png",
+      "label": "Landsat acquisition",
+      "bounds": [[69.126, 41.396], [69.466, 41.396], [69.466, 41.166], [69.126, 41.166]]
+    },
+    {
+      "date": "2024-08-19",
+      "url": "https://data.example.com/tashkent_lst_2024-08-19.png",
+      "label": "Landsat acquisition",
+      "bounds": [[69.126, 41.396], [69.466, 41.396], [69.466, 41.166], [69.126, 41.166]]
+    }
+  ]
+}
