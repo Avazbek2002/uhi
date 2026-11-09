@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Tashkent 3D shade</title>
+<style>
+html,body{margin:0;background:#0b141d;overflow:hidden;font-family:Inter,"Segoe UI",Helvetica,Arial,sans-serif;color:#fff}
+#c{position:absolute;left:0;top:0}
+.t{position:absolute;white-space:nowrap}
+#title{left:60px;top:38px;font-size:44px;font-weight:700;letter-spacing:-.5px}
+#sub{left:62px;top:96px;font-size:24px;color:#9fb3c6}
+#clock{right:60px;top:34px;font-size:64px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+#sun{right:62px;top:108px;font-size:24px;color:#9fb3c6;text-align:right}
+.lab{transform:translate(-50%,0);text-align:center;font-size:30px;font-weight:600}
+.lab b{display:block;font-size:46px;color:#ffd27a;font-weight:800;margin-top:2px}
+#foot{left:0;right:0;bottom:22px;text-align:center;font-size:20px;color:#8fa3b5}
+#bar{left:60px;right:60px;bottom:64px;height:6px;background:#1d2a38;border-radius:3px}
+#dot{position:absolute;top:-6px;width:18px;height:18px;border-radius:9px;background:#ffd27a;margin-left:-9px}
+#end{left:0;right:0;top:0;bottom:0;background:rgba(8,14,22,.80);opacity:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+#end h1{font-size:64px;margin:0 0 14px;font-weight:800}
+#end .row{display:flex;gap:110px;margin:30px 0 24px}
+#end .big{font-size:120px;font-weight:800;line-height:1}
+#end .cap{font-size:28px;color:#b5c5d4;margin-top:8px}
+#end .note{font-size:28px;color:#e6eef6;max-width:1400px;line-height:1.35}
+#end .fine{font-size:20px;color:#8fa3b5;margin-top:26px}
+</style></head><body>
+<canvas id="c"></canvas>
+<div class="t" id="title">Sun, shade and heat in Tashkent</div><div class="t" id="sub"></div>
+<div class="t" id="clock"></div><div class="t" id="sun"></div>
+<div class="t lab" id="l0"></div><div class="t lab" id="l1"></div>
+<div class="t" id="bar"><div id="dot"></div></div>
+<div class="t" id="foot">Modelled, not measured: shadows from OpenStreetMap building footprints with estimated heights. Trees not included. Local time (UTC+5).</div>
+<div class="t" id="end"><h1>Cooler, but not because of building shade alone</h1>
+ <div class="row"><div><div class="big" style="color:#8ec5ff">42.6°</div><div class="cap">microrayon-style mahallas<br>(44 areas)</div></div><div><div class="big" style="color:#ff8a6a">45.8°</div><div class="cap">low-rise private-house mahallas<br>(243 areas)</div></div></div>
+ <div class="note">Average satellite surface temperature, summer Landsat scenes.<br>The gap holds at every distance from the centre. A likely factor still to test: yard trees and open green space.</div>
+ <div class="fine">Landsat surface temperature at about 10:55 local time, not air temperature. Correlation across neighbourhoods, not proof of cause.</div></div>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
+const W=1920,H=1080,DATA=await (await fetch('scene3d.json')).json(), NF=DATA.minutes.length, END=72, TOTAL=NF+END, OFF=345;
+const cv=document.getElementById('c'); const R=new THREE.WebGLRenderer({canvas:cv,antialias:true,preserveDrawingBuffer:true}); R.setSize(W,H,false); cv.style.width=W+'px'; cv.style.height=H+'px';
+R.shadowMap.enabled=true; R.shadowMap.type=THREE.PCFSoftShadowMap; R.outputColorSpace=THREE.SRGBColorSpace; R.toneMapping=THREE.ACESFilmicToneMapping; R.toneMappingExposure=0.95;
+const scene=new THREE.Scene(); scene.background=new THREE.Color('#0b141d');
+const cam=new THREE.PerspectiveCamera(33,W/H,10,6000);
+const hemi=new THREE.HemisphereLight('#a9c3e0','#40362a',0.5); scene.add(hemi);
+const sun=new THREE.DirectionalLight('#fff1d6',3.2); sun.castShadow=true; sun.shadow.mapSize.set(4096,4096); const sc=sun.shadow.camera; sc.left=-820;sc.right=820;sc.top=820;sc.bottom=-820;sc.near=10;sc.far=4200; sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.6; scene.add(sun); scene.add(sun.target);
+const c0=new THREE.Color('#f4f0e8'), c1=new THREE.Color('#cfe2f6');
+DATA.tiles.forEach((T,k)=>{
+  const g=new THREE.Group(); g.position.x=k?OFF:-OFF; scene.add(g);
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(T.half*2,T.half*2).rotateX(-Math.PI/2),new THREE.MeshStandardMaterial({color:'#a47f52',roughness:1})); ground.receiveShadow=true; g.add(ground);
+  const edge=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-1,-1],[1,-1],[1,1],[-1,1]].map(p=>new THREE.Vector3(p[0]*T.half,0.3,p[1]*T.half))),new THREE.LineBasicMaterial({color:'#5f7287'})); g.add(edge);
+  const vis=[],cast=[];
+  for(const b of T.buildings){
+    const sh=new THREE.Shape(b.r.map(p=>new THREE.Vector2(p[0],p[1]))); for(const hl of b.holes) sh.holes.push(new THREE.Path(hl.map(p=>new THREE.Vector2(p[0],p[1]))));
+    const geo=new THREE.ExtrudeGeometry(sh,{depth:b.h,bevelEnabled:false}); const cx=b.r.reduce((a,p)=>a+p[0],0)/b.r.length, cy=b.r.reduce((a,p)=>a+p[1],0)/b.r.length;
+    const col=c0.clone().lerp(c1,Math.min(1,Math.max(0,(b.h-3)/30))); const n=geo.attributes.position.count, ca=new Float32Array(n*3); for(let i=0;i<n;i++){ca[i*3]=col.r;ca[i*3+1]=col.g;ca[i*3+2]=col.b;} geo.setAttribute('color',new THREE.BufferAttribute(ca,3));
+    ((Math.abs(cx)<=T.half&&Math.abs(cy)<=T.half)?vis:cast).push(geo);
+  }
+  const m=new THREE.Mesh(mergeGeometries(vis),new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.9})); m.rotation.x=-Math.PI/2; m.castShadow=true; m.receiveShadow=true; g.add(m);
+  if(cast.length){const mc=new THREE.Mesh(mergeGeometries(cast),new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false})); mc.rotation.x=-Math.PI/2; mc.castShadow=true; g.add(mc);}   // buildings just outside the square: invisible, but they still cast shadows into it
+});
+const $=id=>document.getElementById(id); const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+function fmt(m){const h=Math.floor(m/60),mm=Math.floor(m%60);return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0');}
+window.TOTAL=TOTAL;
+window.render=function(f){
+  const i=Math.min(f,NF-1), s=DATA.sun[i], el=s.el*Math.PI/180, az=s.az*Math.PI/180;
+  const d=new THREE.Vector3(Math.sin(az)*Math.cos(el),Math.sin(el),-Math.cos(az)*Math.cos(el));            // direction to the sun; x east, -z north
+  sun.position.copy(d.clone().multiplyScalar(2200)); sun.target.position.set(0,0,0); sun.target.updateMatrixWorld(); sun.intensity=3.4*Math.min(1,0.25+1.1*Math.sin(el));
+  const u=f/(TOTAL-1), ph=-0.32+0.64*ease(Math.min(1,f/(NF-1))), ce=0.62-0.1*Math.sin(Math.PI*Math.min(1,f/(NF-1))), D=1580;
+  cam.position.set(D*Math.cos(ce)*Math.sin(ph),D*Math.sin(ce),D*Math.cos(ce)*Math.cos(ph)); cam.lookAt(0,10,-30); cam.updateMatrixWorld(); R.render(scene,cam);
+  $('clock').textContent=fmt(DATA.minutes[i]); $('sun').textContent='sun '+Math.round(s.el)+'° above the horizon · '+new Date(DATA.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
+  $('sub').textContent='Same day, same sun, two kinds of neighbourhood';
+  DATA.tiles.forEach((T,k)=>{const e=$('l'+k); e.style.left=(k?1440:480)+'px'; e.style.top='158px'; const sv=T.shade[i]; e.innerHTML=T.label+'<b>'+(sv==null?'':Math.round(sv)+'% of open ground in shade')+'</b>';});
+  $('dot').style.left=(100*i/(NF-1))+'%'; $('end').style.opacity=f<NF?0:Math.min(1,(f-NF)/16);
+  return true;
+};
+window.READY=true;
+</script></body></html>
