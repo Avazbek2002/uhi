@@ -13,6 +13,12 @@ on:
         description: "Build the map but upload nothing"
         type: boolean
         default: false
+      days_back:
+        description: "Look this many days back for scenes (default 60). For a backfill of this season use 240"
+        required: false
+      max_scenes:
+        description: "Most scenes to map in this run (default 6). Each takes roughly 5 to 10 minutes"
+        required: false
 
 concurrency:
   group: unet10m
@@ -24,7 +30,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,8 +51,12 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           INPUT_DATE: ${{ github.event.inputs.date }}
           INPUT_DRY: ${{ github.event.inputs.dry_run }}
+          INPUT_DAYS: ${{ github.event.inputs.days_back }}
+          INPUT_MAX: ${{ github.event.inputs.max_scenes }}
         run: |
           args=""
           if [ -n "$INPUT_DATE" ]; then args="$args --date $INPUT_DATE"; fi
           if [ "$INPUT_DRY" = "true" ]; then args="$args --dry-run"; fi
+          if [ -n "$INPUT_DAYS" ]; then args="$args --days-back $INPUT_DAYS"; fi
+          if [ -n "$INPUT_MAX" ]; then args="$args --max-scenes $INPUT_MAX"; fi
           python pipeline/run_pipeline.py $args
