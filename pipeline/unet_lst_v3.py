@@ -74,6 +74,7 @@ def ee_setup():
     key = os.environ.get('GEE_SERVICE_ACCOUNT_KEY')      # CI / servers: a service-account json in this variable (same name as the uhi Modal job uses)
     if key:
         kd = json.loads(key); ee.Initialize(credentials=ee.ServiceAccountCredentials(kd['client_email'], key_data=key), project=os.environ.get('GEE_PROJECT_ID') or kd.get('project_id') or PROJECT); return ee
+    if os.environ.get('CI'): raise SystemExit('GEE_SERVICE_ACCOUNT_KEY is empty: add it as a repository secret (the whole service-account JSON). Not falling back to an interactive login in CI.')
     try: ee.Initialize(project=PROJECT)
     except Exception:
         # 'notebook' mode works on a remote Jupyter / server without gcloud: it prints a link, you sign in there and paste the code back
