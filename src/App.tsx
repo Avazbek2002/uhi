@@ -90,10 +90,14 @@ type District = Feature<Geometry, DistrictProps> & {
 type Mode = "mahalla" | "district";
 type LayerMode = "mahalla" | "district" | "raster" | "modelled";
 // One modelled 10 m map (written by `export_site` in the U-Net script). Modelled, not measured.
+// Entries come from the daily pipeline (one per Landsat date, `date`) or from `export_site` (a typical-day scenario, `id` + `period`).
 type ModelledEntry = {
   id: string;
+  date?: string;
   label: string;
   url: string;
+  model_version?: string;
+  stats?: { min: number; max: number; median?: number };
   bounds: [[number, number], [number, number], [number, number], [number, number]];
   period?: [string, string];
   scene_mean_c?: number;
@@ -1244,18 +1248,32 @@ export default function App() {
   const [modelledMaps, setModelledMaps] = useState<ModelledEntry[]>([]);
   const [modelledId, setModelledId] = useState("");
 
-  // Modelled 10 m maps (written by the U-Net script's `export_site`; the file is optional, the button only shows when it exists)
+  // Modelled 10 m maps: the pipeline's manifest on R2 first, then a bundled copy (the button only shows when one exists)
   useEffect(() => {
-    fetch("/data/unet10m-manifest.json")
-      .then((r) => (r.ok && !(r.headers.get("content-type") ?? "").includes("text/html") ? r.json() : null))
-      .then((payload: { maps?: ModelledEntry[] } | null) => {
-        const entries = (payload?.maps ?? []).filter((e) => e.id && e.url && e.bounds?.length === 4);
-        if (entries.length) {
-          setModelledMaps(entries);
-          setModelledId(entries[0].id);
+    const urls = [
+      "https://pub-ec33c8a1d13f40f4935fa09d39bb00ce.r2.dev/unet10m/manifest.json",
+      "/data/unet10m-manifest.json",
+    ];
+    (async () => {
+      for (const url of urls) {
+        try {
+          const r = await fetch(url);
+          if (!r.ok || (r.headers.get("content-type") ?? "").includes("text/html")) continue;
+          const payload = (await r.json()) as { maps?: Partial<ModelledEntry>[] };
+          const entries = (payload.maps ?? [])
+            .map((e) => ({ ...e, id: e.id ?? e.date ?? "", label: e.label ?? e.date ?? "" }) as ModelledEntry)
+            .filter((e) => e.id && e.url && e.bounds?.length === 4)
+            .sort((x, y) => x.id.localeCompare(y.id));
+          if (entries.length) {
+            setModelledMaps(entries);
+            setModelledId(entries[entries.length - 1].id); // the newest
+            return;
+          }
+        } catch {
+          continue;
         }
-      })
-      .catch(() => undefined);
+      }
+    })();
   }, []);
 
   // Load Manifest
@@ -1396,6 +1414,7 @@ export default function App() {
     () => lstMaps.find((map) => map.date === selectedDate),
     [lstMaps, selectedDate]
   );
+  const modelledDated = modelledMaps.length > 0 && modelledMaps.every((m) => /^\d{4}-\d{2}-\d{2}$/.test(m.date ?? ""));
   const selectedModelled = useMemo(
     () => modelledMaps.find((m) => m.id === modelledId),
     [modelledMaps, modelledId]
@@ -1841,7 +1860,9 @@ export default function App() {
               </strong>
               <span>
                 {layerMode === "modelled"
-                  ? (selectedModelled?.label ?? "No modelled map")
+                  ? selectedModelled?.date
+                    ? formatMapDate(selectedModelled.date)
+                    : (selectedModelled?.label ?? "No modelled map")
                   : selectedDate
                     ? formatMapDate(selectedDate)
                     : "Choose an available date"}
@@ -1883,10 +1904,11 @@ export default function App() {
             )}
           </div>
           {layerMode === "modelled" ? (
+            <>
             <div className="model-panel">
               <div className="model-panel-head">
                 <strong>MODELLED, NOT MEASURED</strong>
-                {modelledMaps.length > 1 && (
+                {modelledMaps.length > 1 && !modelledDated && (
                   <select
                     value={modelledId}
                     onChange={(e) => {
@@ -1910,11 +1932,24 @@ export default function App() {
               </p>
               <p>
                 {selectedModelled?.period
-                  ? `A typical day between ${selectedModelled.period[0]} and ${selectedModelled.period[1]}: median Landsat surface temperature and average ERA5 weather at the satellite overpass hour. `
-                  : ""}
-                It is not a forecast and not a specific date.
+                  ? `A typical day between ${selectedModelled.period[0]} and ${selectedModelled.period[1]}: median Landsat surface temperature and average ERA5 weather at the satellite overpass hour. It is not a forecast and not a specific date.`
+                  : selectedModelled?.date
+                    ? `Landsat 8/9 pass of ${formatMapDate(selectedModelled.date)}: Sentinel-2 within three days, weather at the overpass hour, and that scene's 120 m temperatures as the anchor. A map exists only for clear scenes, April to mid-October.`
+                    : ""}
+                {selectedModelled?.model_version ? ` Model ${selectedModelled.model_version}.` : ""}
               </p>
             </div>
+            {modelledDated && (
+              <LstCalendar
+                maps={modelledMaps.map((m) => ({ date: m.date as string, url: m.url }))}
+                selectedDate={modelledId}
+                onSelect={(date) => {
+                  setModelledId(date);
+                  setRasterStatus("missing");
+                }}
+              />
+            )}
+            </>
           ) : (
             <LstCalendar
               maps={lstMaps}

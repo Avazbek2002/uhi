@@ -1,0 +1,52 @@
+name: unet10m
+
+# One 10 m modelled surface-temperature map per new, clear Landsat 8/9 scene. See pipeline/README.md.
+on:
+  schedule:
+    - cron: "41 3 * * *"        # every day, 08:41 Tashkent time; most days there is nothing new and the run ends in a minute
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Map only this Landsat date (YYYY-MM-DD), even if it exists already"
+        required: false
+      dry_run:
+        description: "Build the map but upload nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: unet10m
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+      - name: Install (CPU torch)
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r pipeline/requirements.txt
+      - name: Map new scenes
+        env:
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
+          GEE_PROJECT_ID: ${{ secrets.GEE_PROJECT_ID }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_DRY: ${{ github.event.inputs.dry_run }}
+        run: |
+          args=""
+          if [ -n "$INPUT_DATE" ]; then args="$args --date $INPUT_DATE"; fi
+          if [ "$INPUT_DRY" = "true" ]; then args="$args --dry-run"; fi
+          python pipeline/run_pipeline.py $args
