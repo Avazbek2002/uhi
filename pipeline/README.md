@@ -43,6 +43,7 @@ Every map is built the way the training data was: Sentinel-2 median within ±3 d
 
 - **New model**: train, evaluate on held-out data, publish with a new `--version`. The next run uses it. Existing maps keep the version they were built with (recorded in the manifest). To rebuild old dates with the new model, run the workflow per date or run `python pipeline/run_pipeline.py --force --max-scenes 20`.
 - **Roll back**: `python pipeline/publish_model.py --version <older> --only-pointer`.
+- **Backfill a season**: Actions → unet10m → Run workflow with `days_back` 240 and `max_scenes` 8 (each scene takes roughly 5 to 10 minutes; the manifest is updated after every scene, so run it again to continue where it stopped). Already mapped dates are skipped.
 - **Failures**: the job fails (and GitHub emails the repo owner) only for unexpected errors. Skipped scenes are normal and listed in the run summary.
 - **Local test**: `python pipeline/run_pipeline.py --dry-run --date YYYY-MM-DD` (needs the Earth Engine variables and a published model).
 - `pipeline/unet_lst_v3.py` is the training script, copied here so training and serving share the same code (`render_tiles`, `scene_map`, `qc_scene`).
