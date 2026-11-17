@@ -88,7 +88,18 @@ type District = Feature<Geometry, DistrictProps> & {
 };
 
 type Mode = "mahalla" | "district";
-type LayerMode = "mahalla" | "district" | "raster";
+type LayerMode = "mahalla" | "district" | "raster" | "modelled";
+// One modelled 10 m map (written by `export_site` in the U-Net script). Modelled, not measured.
+type ModelledEntry = {
+  id: string;
+  label: string;
+  url: string;
+  bounds: [[number, number], [number, number], [number, number], [number, number]];
+  period?: [string, string];
+  scene_mean_c?: number;
+  weather?: Record<string, number>;
+  seeds?: number[];
+};
 type RasterBoundaryMode = "none" | "mahalla" | "district";
 type RasterBounds = [
   [number, number],
@@ -594,6 +605,7 @@ function MapboxMap({
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const token = import.meta.env.VITE_MAPBOX_TOKEN;
+  const isRasterMode = layerMode === "raster" || layerMode === "modelled"; // Landsat scenes and the modelled 10 m map share the same raster layer
 
   const lstOpacityRef = useRef(lstOpacity);
   lstOpacityRef.current = lstOpacity;
@@ -823,7 +835,7 @@ function MapboxMap({
 
     const isMahalla = layerMode === "mahalla";
     const isDistrict = layerMode === "district";
-    const isRaster = layerMode === "raster";
+    const isRaster = isRasterMode;
 
     if (m.getLayer("lst-raster") && m.getLayer("mahalla-fill")) {
       m.moveLayer("lst-raster", "mahalla-fill");
@@ -897,10 +909,10 @@ function MapboxMap({
         id: "mahalla-fill",
         type: "fill",
         source: "mahallas",
-        layout: { visibility: (layerMode === "mahalla" || (layerMode === "raster" && rasterBoundary === "mahalla")) ? "visible" : "none" },
+        layout: { visibility: (layerMode === "mahalla" || (isRasterMode && rasterBoundary === "mahalla")) ? "visible" : "none" },
         paint: {
           "fill-color": LST_FILL_COLOR,
-          "fill-opacity": layerMode === "raster" ? 0.001 : [
+          "fill-opacity": isRasterMode ? 0.001 : [
             "case",
             ["boolean", ["feature-state", "selected"], false], 0.97,
             0.82,
@@ -911,11 +923,11 @@ function MapboxMap({
         id: "mahalla-outline",
         type: "line",
         source: "mahallas",
-        layout: { visibility: (layerMode === "mahalla" || (layerMode === "raster" && rasterBoundary === "mahalla")) ? "visible" : "none" },
+        layout: { visibility: (layerMode === "mahalla" || (isRasterMode && rasterBoundary === "mahalla")) ? "visible" : "none" },
         paint: {
-          "line-color": layerMode === "raster" ? "#ffffff" : "#1e2b2b",
-          "line-width": layerMode === "raster" ? 1.2 : 0.6,
-          "line-opacity": layerMode === "raster" ? 0.9 : 0.7,
+          "line-color": isRasterMode ? "#ffffff" : "#1e2b2b",
+          "line-width": isRasterMode ? 1.2 : 0.6,
+          "line-opacity": isRasterMode ? 0.9 : 0.7,
         },
       });
       instance.addLayer({
@@ -945,10 +957,10 @@ function MapboxMap({
         id: "district-fill",
         type: "fill",
         source: "districts",
-        layout: { visibility: (layerMode === "district" || (layerMode === "raster" && rasterBoundary === "district")) ? "visible" : "none" },
+        layout: { visibility: (layerMode === "district" || (isRasterMode && rasterBoundary === "district")) ? "visible" : "none" },
         paint: {
           "fill-color": LST_FILL_COLOR,
-          "fill-opacity": layerMode === "raster" ? 0.001 : [
+          "fill-opacity": isRasterMode ? 0.001 : [
             "case",
             ["boolean", ["feature-state", "selected"], false], 0.95,
             0.82,
@@ -959,11 +971,11 @@ function MapboxMap({
         id: "district-outline",
         type: "line",
         source: "districts",
-        layout: { visibility: (layerMode === "district" || (layerMode === "raster" && rasterBoundary === "district")) ? "visible" : "none" },
+        layout: { visibility: (layerMode === "district" || (isRasterMode && rasterBoundary === "district")) ? "visible" : "none" },
         paint: {
-          "line-color": layerMode === "raster" ? "#ffffff" : "#2a3635",
-          "line-width": layerMode === "raster" ? 2.2 : 1.5,
-          "line-opacity": layerMode === "raster" ? 0.95 : 1.0,
+          "line-color": isRasterMode ? "#ffffff" : "#2a3635",
+          "line-width": isRasterMode ? 2.2 : 1.5,
+          "line-opacity": isRasterMode ? 0.95 : 1.0,
         },
       });
       instance.addLayer({
@@ -1040,7 +1052,7 @@ function MapboxMap({
     const cogUrl     = rasterEntry?.cog_url ?? LST_GEOTIFF_URL;
     const bounds     = normalizeBoundsToWgs84(rasterEntry?.bounds ?? LST_RASTER_BOUNDS);
     const beforeLayer = instance.getLayer("mahalla-fill") ? "mahalla-fill" : undefined;
-    const visible = layerMode === "raster" ? "visible" : "none";
+    const visible = isRasterMode ? "visible" : "none";
 
     const addLayer = (sourceId: string) => {
       instance.addLayer(
@@ -1063,7 +1075,7 @@ function MapboxMap({
         bounds: [69.126, 41.166, 69.466, 41.396],
       });
       addLayer("lst-raster");
-      instance.once("idle", () => { if (layerMode === "raster") onRasterStatus("ready"); });
+      instance.once("idle", () => { if (isRasterMode) onRasterStatus("ready"); });
 
     } else if (rawImageUrl && isImageRasterUrl(rawImageUrl)) {
       const probe = new Image();
@@ -1073,9 +1085,9 @@ function MapboxMap({
           instance.addSource("lst-raster", { type: "image", url: rawImageUrl, coordinates: bounds });
           addLayer("lst-raster");
         }
-        if (layerMode === "raster") onRasterStatus("ready");
+        if (isRasterMode) onRasterStatus("ready");
       };
-      probe.onerror = () => { if (layerMode === "raster") onRasterStatus("error"); };
+      probe.onerror = () => { if (isRasterMode) onRasterStatus("error"); };
       probe.src = rawImageUrl;
 
     } else if (cogUrl) {
@@ -1088,19 +1100,19 @@ function MapboxMap({
           });
           addLayer("lst-raster");
         }
-        if (layerMode === "raster") onRasterStatus("ready");
-      }).catch(() => { if (layerMode === "raster") onRasterStatus("error"); });
+        if (isRasterMode) onRasterStatus("ready");
+      }).catch(() => { if (isRasterMode) onRasterStatus("error"); });
 
     } else if (LST_RASTER_URL) {
       instance.addSource("lst-raster", { type: "image", url: LST_RASTER_URL, coordinates: LST_RASTER_BOUNDS });
       addLayer("lst-raster");
       const img = new Image();
-      img.onload = () => { if (layerMode === "raster") onRasterStatus("ready"); };
-      img.onerror = () => { if (layerMode === "raster") onRasterStatus("error"); };
+      img.onload = () => { if (isRasterMode) onRasterStatus("ready"); };
+      img.onerror = () => { if (isRasterMode) onRasterStatus("error"); };
       img.src = LST_RASTER_URL;
 
     } else {
-      if (layerMode === "raster") onRasterStatus("missing");
+      if (isRasterMode) onRasterStatus("missing");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rasterEntry, layerMode, onRasterStatus]);
@@ -1229,6 +1241,22 @@ export default function App() {
   const [lstMaps, setLstMaps] = useState<LstMapEntry[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
   const [rasterStatus, setRasterStatus] = useState<"ready" | "missing" | "error">("missing");
+  const [modelledMaps, setModelledMaps] = useState<ModelledEntry[]>([]);
+  const [modelledId, setModelledId] = useState("");
+
+  // Modelled 10 m maps (written by the U-Net script's `export_site`; the file is optional, the button only shows when it exists)
+  useEffect(() => {
+    fetch("/data/unet10m-manifest.json")
+      .then((r) => (r.ok && !(r.headers.get("content-type") ?? "").includes("text/html") ? r.json() : null))
+      .then((payload: { maps?: ModelledEntry[] } | null) => {
+        const entries = (payload?.maps ?? []).filter((e) => e.id && e.url && e.bounds?.length === 4);
+        if (entries.length) {
+          setModelledMaps(entries);
+          setModelledId(entries[0].id);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Load Manifest
   // Tries the R2 URL first (now that CORS is configured on the bucket),
@@ -1367,6 +1395,18 @@ export default function App() {
   const selectedLstMap = useMemo(
     () => lstMaps.find((map) => map.date === selectedDate),
     [lstMaps, selectedDate]
+  );
+  const selectedModelled = useMemo(
+    () => modelledMaps.find((m) => m.id === modelledId),
+    [modelledMaps, modelledId]
+  );
+  // The map component reads one raster entry; in the modelled mode it is the 10 m map.
+  const rasterEntry: LstMapEntry | undefined = useMemo(
+    () =>
+      layerMode === "modelled"
+        ? selectedModelled && { date: selectedModelled.id, url: selectedModelled.url, bounds: selectedModelled.bounds }
+        : selectedLstMap,
+    [layerMode, selectedModelled, selectedLstMap]
   );
 
   // ── DYNAMIC STATS SYNC: MERGE MANIFEST STATS INTO MAHALLAS & DISTRICTS ──
@@ -1581,6 +1621,17 @@ export default function App() {
                 >
                   LST Raster
                 </button>
+                {modelledMaps.length > 0 && (
+                  <button
+                    className={layerMode === "modelled" ? "active" : ""}
+                    onClick={() => {
+                      setLayerMode("modelled");
+                      setRasterStatus("missing");
+                    }}
+                  >
+                    Modelled 10 m
+                  </button>
+                )}
               </div>
               <select
                 value={district}
@@ -1605,7 +1656,7 @@ export default function App() {
                   rasterBoundary={rasterBoundary}
                   onSelect={setSelected}
                   selectedFeatureId={selected?.properties.mahalla_id ?? null}
-                  rasterEntry={selectedLstMap}
+                  rasterEntry={rasterEntry}
                   lstOpacity={lstOpacity}
                   satellite={satellite}
                   onRasterStatus={setRasterStatus}
@@ -1625,7 +1676,7 @@ export default function App() {
               </div>
             )}
             <div className="map-legend">
-              {layerMode === "raster" ? (
+              {layerMode === "raster" || layerMode === "modelled" ? (
                 <>
                   <div className="legend-boundary-selector" style={{ marginBottom: 12, width: "100%" }}>
                     <span
@@ -1709,32 +1760,55 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="legend-title">
-                    <span>°C</span> LST THERMAL
-                  </div>
-                  <div className="legend-gradient inferno" />
-                  <div className="legend-labels">
-                    <span>20°</span>
-                    <span>35°</span>
-                    <span>50°</span>
-                    <span>65°</span>
-                  </div>
-                  <div className="legend-swatches">
-                    <span className="swatch" style={{ background: "#000004" }} />
-                    <span className="swatch-label">Cool</span>
-                    <span className="swatch" style={{ background: "#8c2981" }} />
-                    <span className="swatch-label">Moderate</span>
-                    <span className="swatch" style={{ background: "#fe9f6d" }} />
-                    <span className="swatch-label">Hot</span>
-                    <span className="swatch" style={{ background: "#fcfdbf" }} />
-                    <span className="swatch-label">Extreme</span>
-                  </div>
-                  <div
-                    className="legend-note"
-                    style={{ borderTop: 0, paddingTop: 0, marginTop: 8 }}
-                  >
-                    Landsat 8/9 surface temperature
-                  </div>
+                  {layerMode === "modelled" ? (
+                    <>
+                      <div className="legend-title">
+                        <span>°C</span> MODELLED SURFACE TEMPERATURE
+                      </div>
+                      <div
+                        className="legend-gradient"
+                        style={{ background: "linear-gradient(90deg,#0000ff,#00ffff,#ffff00,#ff7700,#ff0000)" }}
+                      />
+                      <div className="legend-labels">
+                        <span>25°</span>
+                        <span>35°</span>
+                        <span>45°</span>
+                        <span>55°</span>
+                      </div>
+                      <div className="legend-note" style={{ borderTop: 0, paddingTop: 0, marginTop: 8 }}>
+                        U-Net, 10 m pixels. Modelled, not measured.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="legend-title">
+                        <span>°C</span> LST THERMAL
+                      </div>
+                      <div className="legend-gradient inferno" />
+                      <div className="legend-labels">
+                        <span>20°</span>
+                        <span>35°</span>
+                        <span>50°</span>
+                        <span>65°</span>
+                      </div>
+                      <div className="legend-swatches">
+                        <span className="swatch" style={{ background: "#000004" }} />
+                        <span className="swatch-label">Cool</span>
+                        <span className="swatch" style={{ background: "#8c2981" }} />
+                        <span className="swatch-label">Moderate</span>
+                        <span className="swatch" style={{ background: "#fe9f6d" }} />
+                        <span className="swatch-label">Hot</span>
+                        <span className="swatch" style={{ background: "#fcfdbf" }} />
+                        <span className="swatch-label">Extreme</span>
+                      </div>
+                      <div
+                        className="legend-note"
+                        style={{ borderTop: 0, paddingTop: 0, marginTop: 8 }}
+                      >
+                        Landsat 8/9 surface temperature
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <>
@@ -1761,12 +1835,16 @@ export default function App() {
                   ? "MAHALLA VIEW"
                   : layerMode === "district"
                     ? "DISTRICT VIEW"
-                    : "LST RASTER"}
+                    : layerMode === "modelled"
+                      ? "MODELLED 10 m"
+                      : "LST RASTER"}
               </strong>
               <span>
-                {selectedDate
-                  ? formatMapDate(selectedDate)
-                  : "Choose an available date"}
+                {layerMode === "modelled"
+                  ? (selectedModelled?.label ?? "No modelled map")
+                  : selectedDate
+                    ? formatMapDate(selectedDate)
+                    : "Choose an available date"}
               </span>
             </div>
             <div className="map-controls" aria-label="Map display controls">
@@ -1791,7 +1869,7 @@ export default function App() {
                 <strong>{Math.round(lstOpacity * 100)}%</strong>
               </label>
             </div>
-            {rasterStatus !== "ready" && (
+            {rasterStatus !== "ready" && layerMode !== "modelled" && (
               <div className="raster-alert">
                 <strong>LST raster not loaded</strong>
                 <span>
@@ -1804,16 +1882,55 @@ export default function App() {
               </div>
             )}
           </div>
-          <LstCalendar
-            maps={lstMaps}
-            selectedDate={selectedDate}
-            onSelect={(date) => {
-              setSelectedDate(date);
-              setRasterStatus("missing");
-            }}
-          />
+          {layerMode === "modelled" ? (
+            <div className="model-panel">
+              <div className="model-panel-head">
+                <strong>MODELLED, NOT MEASURED</strong>
+                {modelledMaps.length > 1 && (
+                  <select
+                    value={modelledId}
+                    onChange={(e) => {
+                      setModelledId(e.target.value);
+                      setRasterStatus("missing");
+                    }}
+                  >
+                    {modelledMaps.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <p>
+                A neural network estimates surface temperature at 10 m from Sentinel-2 imagery, weather and a simple
+                energy-balance rule. Averages over about 120 m are checked against Landsat on dates and places the
+                model never saw (typical error 1.6 °C). The detail inside a 120 m block is inferred and has not been
+                checked against ground measurements.
+              </p>
+              <p>
+                {selectedModelled?.period
+                  ? `A typical day between ${selectedModelled.period[0]} and ${selectedModelled.period[1]}: median Landsat surface temperature and average ERA5 weather at the satellite overpass hour. `
+                  : ""}
+                It is not a forecast and not a specific date.
+              </p>
+            </div>
+          ) : (
+            <LstCalendar
+              maps={lstMaps}
+              selectedDate={selectedDate}
+              onSelect={(date) => {
+                setSelectedDate(date);
+                setRasterStatus("missing");
+              }}
+            />
+          )}
           <div className="map-foot">
-            <span>Source: downscaled Landsat thermal product</span>
+            <span>
+              {layerMode === "modelled"
+                ? "Source: U-Net model on Sentinel-2, ERA5 and OpenStreetMap, anchored to Landsat 8/9"
+                : "Source: downscaled Landsat thermal product"}
+            </span>
             <span>Click a polygon to inspect</span>
           </div>
         </section>

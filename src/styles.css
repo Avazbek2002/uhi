@@ -960,3 +960,35 @@ select,
     color: #798782;
     font: 9px 'DM Mono', monospace;
 }
+
+.model-panel {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid #5b3b1c;
+    border-radius: 6px;
+    background: rgba(245, 181, 107, .07);
+    color: #b9c3be;
+    font: 11px/1.5 'DM Sans', system-ui, sans-serif
+}
+
+.model-panel p {
+    margin: 6px 0 0
+}
+
+.model-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px
+}
+
+.model-panel-head strong {
+    color: #f5b56b;
+    font: 10px 'DM Mono', monospace;
+    letter-spacing: .06em
+}
+
+.model-panel-head select {
+    max-width: 60%;
+    font-size: 11px
+}
