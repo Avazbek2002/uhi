@@ -725,23 +725,30 @@ def render_tiles(model, flags, X0, Y1, tiles, get_x, get_l, sv, mean, dev, water
     mg = 48; N = PX * tiles; mb = mg // BLOCK
     full = np.full((N, N), fill, np.float32); plain = np.full((N, N), fill, np.float32); unc = np.full((N, N), fill, np.float32); wmap = np.zeros((N, N), np.float32)
     done, skipped, lv = 0, [], []
-    for ty in range(tiles):
-        for tx in range(tiles):
-            x0, y1 = X0 + tx * PATCH_M, Y1 - ty * PATCH_M
-            if keep is not None and not keep(x0, y1): continue
-            x = get_x(x0, y1); ok = (x > -900).all(axis=0)
-            if ok.mean() < 0.5: skipped.append((x0, y1)); continue      # Sentinel-2 mostly masked (cloud): no honest estimate for this tile
-            for b in range(x.shape[0]): x[b] = np.where(ok, x[b], x[b][ok].mean())
-            if uses_w(flags): x = np.concatenate([x, water_raster(water_lines, x0 - mg * 10, y1 + mg * 10, PX + 2 * mg)[None]])
-            o = predict(model, x, sv, dev) ; out = o[mg:-mg, mg:-mg] * TARGET_SCALE; spread = predict_spread(model, x, sv, dev)[mg:-mg, mg:-mg] * TARGET_SCALE
-            pb = agg_anom(torch.tensor(o)[None, None], torch.tensor([[mean]], dtype=torch.float32), BLOCK, flags)[0, 0].numpy()[mb:-mb, mb:-mb] * TARGET_SCALE   # block averages with real surroundings (no edge padding)
-            l = get_l(x0, y1); lm = l > -900; la = np.where(lm, l - mean, np.nan); lv.append(float(lm.mean()))
-            diff = np.where(lm, la - pb, 0.0)                                                      # what the model missed at 120 m
-            corr = F.interpolate(torch.tensor(diff, dtype=torch.float32)[None, None], size=(PX, PX), mode='bicubic', align_corners=False)[0, 0].numpy()
-            sm = F.interpolate(torch.tensor(np.where(lm, la, pb), dtype=torch.float32)[None, None], size=(PX, PX), mode='bicubic', align_corners=False)[0, 0].numpy()
-            sl = (slice(ty * PX, (ty + 1) * PX), slice(tx * PX, (tx + 1) * PX))
-            full[sl] = out + corr + mean; plain[sl] = sm + mean; unc[sl] = spread; done += 1
-            if uses_w(flags): wmap[sl] = water_raster(water_lines, x0, y1, PX)
+    coords = [(X0 + tx * PATCH_M, Y1 - ty * PATCH_M) for ty in range(tiles) for tx in range(tiles)]; coords = [c for c in coords if keep is None or keep(*c)]
+    ex = cf.ThreadPoolExecutor(8); t0 = time.time()      # Earth Engine is the slow part, so the downloads of all tiles run side by side while the model works through them in order
+    futs = {c: ex.submit(lambda c=c: (get_x(*c), get_l(*c))) for c in coords}; print(f'estimating {len(coords)} tiles', flush=True)
+    try:
+        for ty in range(tiles):
+            for tx in range(tiles):
+                x0, y1 = X0 + tx * PATCH_M, Y1 - ty * PATCH_M
+                if keep is not None and not keep(x0, y1): continue
+                x, l = futs[(x0, y1)].result(); ok = (x > -900).all(axis=0)
+                if ok.mean() < 0.5: skipped.append((x0, y1)); continue      # Sentinel-2 mostly masked (cloud): no honest estimate for this tile
+                for b in range(x.shape[0]): x[b] = np.where(ok, x[b], x[b][ok].mean())
+                if uses_w(flags): x = np.concatenate([x, water_raster(water_lines, x0 - mg * 10, y1 + mg * 10, PX + 2 * mg)[None]])
+                o = predict(model, x, sv, dev) ; out = o[mg:-mg, mg:-mg] * TARGET_SCALE; spread = predict_spread(model, x, sv, dev)[mg:-mg, mg:-mg] * TARGET_SCALE
+                pb = agg_anom(torch.tensor(o)[None, None], torch.tensor([[mean]], dtype=torch.float32), BLOCK, flags)[0, 0].numpy()[mb:-mb, mb:-mb] * TARGET_SCALE   # block averages with real surroundings (no edge padding)
+                lm = l > -900; la = np.where(lm, l - mean, np.nan); lv.append(float(lm.mean()))
+                diff = np.where(lm, la - pb, 0.0)                                                      # what the model missed at 120 m
+                corr = F.interpolate(torch.tensor(diff, dtype=torch.float32)[None, None], size=(PX, PX), mode='bicubic', align_corners=False)[0, 0].numpy()
+                sm = F.interpolate(torch.tensor(np.where(lm, la, pb), dtype=torch.float32)[None, None], size=(PX, PX), mode='bicubic', align_corners=False)[0, 0].numpy()
+                sl = (slice(ty * PX, (ty + 1) * PX), slice(tx * PX, (tx + 1) * PX))
+                full[sl] = out + corr + mean; plain[sl] = sm + mean; unc[sl] = spread; done += 1
+                print(f'  tile {done + len(skipped)}/{len(coords)} ({time.time() - t0:.0f} s)', flush=True)
+                if uses_w(flags): wmap[sl] = water_raster(water_lines, x0, y1, PX)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     return {'full': full, 'plain': plain, 'unc': unc, 'wmap': wmap, 'tiles_done': done, 'tiles_skipped': skipped, 'landsat_valid_share': float(np.mean(lv)) if lv else 0.0}
 
 def make_map(cfg='all', centre=None, tiles=2, start='2025-06-01', end='2025-08-31'):
@@ -830,11 +837,11 @@ def scene_map(ee, roi, scene, flags, model, dev, water_lines):
     if L.size().getInfo() == 0: raise SceneUnusable('Landsat scene not found')
     img = ee.Image(L.sort('CLOUD_COVER').first()); lst = prep_landsat(ee, img)
     lst120 = lst.reduceResolution(ee.Reducer.mean(), maxPixels=256).reproject(utm.atScale(120)).rename('LST_C').updateMask(inside)
-    mean = lst120.reduceRegion(ee.Reducer.mean(), roi, 120, maxPixels=1e9, tileScale=4).get('LST_C').getInfo()
+    print(f"{scene['date']}: reading the Landsat mean", flush=True); mean = lst120.reduceRegion(ee.Reducer.mean(), roi, 120, maxPixels=1e9, tileScale=4).get('LST_C').getInfo()
     if mean is None: raise SceneUnusable('no valid Landsat pixels inside the polygon (cloud or edge)')
     t0 = ee.Date(t); S2 = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED').filterBounds(roi).filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', S2_CLOUD)).filterDate(t0.advance(-WINDOW_DAYS, 'day'), t0.advance(WINDOW_DAYS + 1, 'day')))
     if S2.size().getInfo() == 0: raise SceneUnusable('no Sentinel-2 image within the window')
-    s2 = s2_stack(ee, S2)
+    print(f"{scene['date']}: Landsat mean {mean:.1f} C, {S2.size().getInfo()} Sentinel-2 images in the window", flush=True); s2 = s2_stack(ee, S2)
     if s2.bandNames().size().getInfo() == 0: raise SceneUnusable('Sentinel-2 surface-reflectance images have no matching top-of-atmosphere images')
     s2 = s2.reproject(utm.atScale(10)); h = ee.Date(round(t / 3600000.0) * 3600000)
     v = ee.ImageCollection('ECMWF/ERA5_LAND/HOURLY').select(ERA_BANDS).filterDate(h, h.advance(1, 'hour')).first().reduceRegion(ee.Reducer.first(), ee.Geometry.Point(list(city_centre())), 11132).getInfo()
