@@ -52,6 +52,17 @@ if CITY != 'tashkent':
     ROI_POLY = _c[CITY]
 def city_centre(): return (69.28, 41.31) if CITY == 'tashkent' else ((min(p[0] for p in ROI_POLY) + max(p[0] for p in ROI_POLY)) / 2, (min(p[1] for p in ROI_POLY) + max(p[1] for p in ROI_POLY)) / 2)
 def roi_geom(ee): return ee.Geometry.Polygon([ROI_POLY], None, False)   # planar edges, as drawn
+
+OUTLINE_FILE = os.environ.get('OUTLINE_FILE') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tashkent_outline.json'); _OUTLINE = None
+def city_polys():
+    """The shape the 10 m maps are cut to: [[outer ring, hole, ...], ...] with [lon, lat] points. For Tashkent this is the outline of the mahalla polygons (tashkent_outline.json, next to this script), the same shape the Landsat LST maps in the app are clipped to. Other cities use their ROI_POLY."""
+    global _OUTLINE
+    if _OUTLINE is None:
+        if CITY == 'tashkent':
+            if not os.path.exists(OUTLINE_FILE): raise SystemExit(f'{OUTLINE_FILE} is missing: put tashkent_outline.json (from pipeline/ in the uhi repo) next to unet_lst_v3.py')
+            _OUTLINE = json.load(open(OUTLINE_FILE))['polygons']
+        else: _OUTLINE = [[ROI_POLY]]
+    return _OUTLINE
 YEARS = (2019, 2025); MONTHS = (6, 8)          # Landsat scenes used: clear June-August days in these years
 LANDSAT_CLOUD, S2_CLOUD, WINDOW_DAYS = 25, 30, 3
 PATCH_M = 3840; PX = 384; BLOCK = 12           # 3.84 km patches, 10 m pixels, 12 x 12 pixels = 120 m
@@ -799,7 +810,7 @@ def write_png(arr, x0, y1, n, path, mask=True):
     from PIL import Image
     import matplotlib; matplotlib.use('Agg'); from matplotlib.colors import LinearSegmentedColormap
     ok = np.isfinite(arr) & (arr > -50)
-    if mask: ok &= poly_mask(x0, y1, n, 10.0)      # outside the city polygon there is no Landsat to anchor the map to, so leave it transparent
+    if mask: ok &= poly_mask(x0, y1, n, 10.0)      # outside the city outline leave it transparent (the same outline the Landsat maps are clipped to)
     cmap = LinearSegmentedColormap.from_list('lst_palette', ['#0000ff', '#00ffff', '#ffff00', '#ff7700', '#ff0000'])
     rgba = cmap(np.clip((np.nan_to_num(arr, nan=25.0) - 25.0) / 30.0, 0, 1)); rgba[~ok] = 0
     Image.fromarray((rgba * 255).astype(np.uint8), 'RGBA').save(path, optimize=True)
@@ -809,7 +820,10 @@ def poly_mask(x0, y1, n, res=10.0, upsample=True):
     """True inside the city polygon. The grid starts at (x0, y1) and is n pixels of 10 m per side; it is returned at `res` metres per pixel, or (upsample=True) repeated back to 10 m pixels."""
     from PIL import Image, ImageDraw
     m = int(round(n * 10.0 / res)); im = Image.new('L', (m, m), 0)
-    ImageDraw.Draw(im).polygon([((ll_to_utm42(lo, la)[0] - x0) / res, (y1 - ll_to_utm42(lo, la)[1]) / res) for lo, la in ROI_POLY], fill=1)
+    d = ImageDraw.Draw(im); px = lambda ring: [((ll_to_utm42(lo, la)[0] - x0) / res, (y1 - ll_to_utm42(lo, la)[1]) / res) for lo, la in ring]
+    for rings in city_polys():
+        d.polygon(px(rings[0]), fill=1)
+        for hole in rings[1:]: d.polygon(px(hole), fill=0)
     a = np.array(im, bool); return a if (res == 10.0 or not upsample) else np.kron(a, np.ones((int(round(res / 10.0)),) * 2, bool))
 
 # ------------------------------------------------------------------ pipeline: one 10 m map per new Landsat scene (used by pipeline/run_pipeline.py in the uhi repo)
@@ -848,7 +862,7 @@ def scene_map(ee, roi, scene, flags, model, dev, water_lines):
     v = ee.ImageCollection('ECMWF/ERA5_LAND/HOURLY').select(ERA_BANDS).filterDate(h, h.advance(1, 'hour')).first().reduceRegion(ee.Reducer.first(), ee.Geometry.Point(list(city_centre())), 11132).getInfo()
     if not v or any(v.get(b) is None for b in ERA_BANDS): raise SceneUnusable('ERA5-Land weather not available yet for this hour')
     sv = np.array(era_vec(v), dtype=np.float32)
-    pts = [ll_to_utm42(lo, la) for lo, la in ROI_POLY]; X0 = int(math.floor(min(p[0] for p in pts) / PATCH_M) * PATCH_M); Y1 = int(math.ceil(max(p[1] for p in pts) / PATCH_M) * PATCH_M)
+    pts = [ll_to_utm42(lo, la) for rings in city_polys() for lo, la in rings[0]]; X0 = int(math.floor(min(p[0] for p in pts) / PATCH_M) * PATCH_M); Y1 = int(math.ceil(max(p[1] for p in pts) / PATCH_M) * PATCH_M)
     tiles = int(math.ceil(max(max(p[0] for p in pts) - X0, Y1 - min(p[1] for p in pts)) / PATCH_M)); pm = poly_mask(X0, Y1, tiles * PX, 120.0, upsample=False); k = PATCH_M // 120
     def keep(x0, y1): i, j = int((Y1 - y1) // PATCH_M), int((x0 - X0) // PATCH_M); return bool(pm[i * k:(i + 1) * k, j * k:(j + 1) * k].any())
     r = render_tiles(model, flags, X0, Y1, tiles, lambda x0, y1: pull(ee, s2, x0 - mg * 10, y1 + mg * 10, PX + 2 * mg, 10), lambda x0, y1: pull(ee, lst120, x0, y1, PATCH_M // 120, 120)[0], sv, mean, dev, water_lines, keep=keep, fill=np.nan)
